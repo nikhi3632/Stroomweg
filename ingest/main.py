@@ -46,8 +46,15 @@ async def run():
                     ingest_journey_times(pool, client),
                 )
                 elapsed = time.monotonic() - cycle_start
+
+                # Query total row counts for confidence
+                async with pool.acquire() as conn:
+                    speed_total = await conn.fetchval("SELECT COUNT(*) FROM speeds_raw")
+                    jt_total = await conn.fetchval("SELECT COUNT(*) FROM journey_times_raw")
+
                 log.info(
-                    f"Cycle: {speed_count} speed rows, {jt_count} journey-time rows in {elapsed:.1f}s"
+                    f"Cycle: +{speed_count} speeds, +{jt_count} jt in {elapsed:.1f}s "
+                    f"| total: {speed_total:,} speeds, {jt_total:,} jt"
                 )
             except Exception:
                 elapsed = time.monotonic() - cycle_start
