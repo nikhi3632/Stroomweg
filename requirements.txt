@@ -1,0 +1,4 @@
+asyncpg
+lxml
+httpx
+python-dotenv
