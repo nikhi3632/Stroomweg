@@ -1,8 +1,6 @@
-.claude
 .venv
 .env
 environment
 data_exploration/
 __pycache__/
 *.pyc
-.idea.txt

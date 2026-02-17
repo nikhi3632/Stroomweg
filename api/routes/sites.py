@@ -5,13 +5,21 @@ from fastapi import APIRouter, HTTPException, Query, Request
 router = APIRouter(prefix="/sites", tags=["sites"])
 
 
-@router.get("")
+@router.get("", summary="List sites", description="""
+Search and filter the 99,324 traffic measurement sites across the Netherlands.
+Each site has a unique ID, road name, coordinates, lane count, and equipment type.
+
+Without filters, returns all sites (paginated). Use `bbox` for geographic queries
+or `road` to find all sensors on a specific highway.
+
+**Example:** `GET /sites?road=A28&limit=10`
+""")
 async def list_sites(
     request: Request,
-    bbox: str | None = Query(None, description="lat1,lon1,lat2,lon2"),
-    road: str | None = Query(None, description="Road name filter, e.g. A28"),
-    limit: int = Query(100, ge=1, le=1000),
-    offset: int = Query(0, ge=0),
+    bbox: str | None = Query(None, description="Bounding box filter: lat1,lon1,lat2,lon2 (e.g. 52.3,4.8,52.4,5.0)"),
+    road: str | None = Query(None, description="Road name (e.g. A28, N201, A2)"),
+    limit: int = Query(100, ge=1, le=1000, description="Maximum results to return"),
+    offset: int = Query(0, ge=0, description="Number of results to skip (for pagination)"),
 ):
     pool = request.app.state.pool
 
@@ -60,7 +68,11 @@ async def list_sites(
     }
 
 
-@router.get("/{site_id}")
+@router.get("/{site_id}", summary="Get site details", description="""
+Get full details for a single measurement site by its ID.
+
+**Example:** `GET /sites/RWS01_MONIBAS_0161hrr0346ra`
+""")
 async def get_site(request: Request, site_id: str):
     pool = request.app.state.pool
 

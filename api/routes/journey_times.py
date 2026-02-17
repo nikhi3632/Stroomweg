@@ -77,17 +77,30 @@ def _jt_row_to_dict(r, include_meta=False):
     return result
 
 
-@router.get("")
+@router.get("", summary="Latest journey times", description="""
+Get the most recent journey time snapshot for route segments. Updated every 60 seconds.
+
+Each segment includes:
+- **duration_sec**: actual measured travel time
+- **ref_duration_sec**: free-flow baseline from NDW
+- **delay_sec**: computed delay (actual - reference)
+- **delay_ratio**: ratio of actual to free-flow (1.0 = no delay, 2.0 = double the usual time)
+- **quality**: NDW data quality score (0-100, higher is more reliable)
+
+Use `min_quality` to filter out low-confidence readings.
+**At least one filter is required** (79,000 segments is too large unfiltered).
+
+**Example:** `GET /journey-times?road=A28&min_quality=50`
+""")
 async def list_journey_times(
     request: Request,
-    bbox: str | None = Query(None, description="lat1,lon1,lat2,lon2"),
-    road: str | None = Query(None, description="Road name filter"),
-    site_id: str | None = Query(None, description="Specific site ID"),
-    min_quality: float | None = Query(None, ge=0, le=100, description="Minimum quality score"),
-    limit: int = Query(100, ge=1, le=1000),
-    offset: int = Query(0, ge=0),
+    bbox: str | None = Query(None, description="Bounding box: lat1,lon1,lat2,lon2"),
+    road: str | None = Query(None, description="Road name (e.g. A28, N201)"),
+    site_id: str | None = Query(None, description="Specific segment ID"),
+    min_quality: float | None = Query(None, ge=0, le=100, description="Minimum NDW quality score (0-100)"),
+    limit: int = Query(100, ge=1, le=1000, description="Maximum results"),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
 ):
-    """Latest journey time snapshot. At least one filter required."""
     if not any([bbox, road, site_id]):
         raise HTTPException(400, "At least one filter required: bbox, road, or site_id")
 
@@ -147,9 +160,12 @@ async def list_journey_times(
     }
 
 
-@router.get("/{site_id}")
+@router.get("/{site_id}", summary="Current journey time for one segment", description="""
+Get the latest journey time reading for a single route segment, including computed delay.
+
+**Example:** `GET /journey-times/PGL03_FV_P1a`
+""")
 async def get_journey_time(request: Request, site_id: str):
-    """Current journey time for one segment."""
     pool = request.app.state.pool
 
     async with pool.acquire() as conn:
@@ -171,17 +187,29 @@ async def get_journey_time(request: Request, site_id: str):
     return _jt_row_to_dict(row)
 
 
-@router.get("/{site_id}/history")
+@router.get("/{site_id}/history", summary="Journey time history", description="""
+Historical journey time readings for a segment across multiple time resolutions.
+
+| Resolution | Retention | Use case |
+|-----------|-----------|----------|
+| `raw` | 7 days | Full 60-second granularity |
+| `5m` | 30 days | Dashboard charts |
+| `15m` | 90 days | Trend analysis |
+| `1h` | Forever | Long-term patterns |
+
+Defaults to the last hour at raw resolution.
+
+**Example:** `GET /journey-times/PGL03_FV_P1a/history?resolution=5m&min_quality=50`
+""")
 async def get_journey_time_history(
     request: Request,
     site_id: str,
-    start: datetime | None = Query(None, alias="from", description="Start time (ISO 8601)"),
-    end: datetime | None = Query(None, alias="to", description="End time (ISO 8601)"),
-    resolution: str = Query("raw", description="raw, 5m, 15m, or 1h"),
-    min_quality: float | None = Query(None, ge=0, le=100),
-    limit: int = Query(1000, ge=1, le=10000),
+    start: datetime | None = Query(None, alias="from", description="Start time (ISO 8601). Default: 1 hour ago"),
+    end: datetime | None = Query(None, alias="to", description="End time (ISO 8601). Default: now"),
+    resolution: str = Query("raw", description="Time resolution: `raw`, `5m`, `15m`, or `1h`"),
+    min_quality: float | None = Query(None, ge=0, le=100, description="Minimum NDW quality score"),
+    limit: int = Query(1000, ge=1, le=10000, description="Maximum data points"),
 ):
-    """Historical journey time readings for a segment."""
     if resolution not in RESOLUTION_TABLE:
         raise HTTPException(400, f"resolution must be one of: {', '.join(RESOLUTION_TABLE.keys())}")
 

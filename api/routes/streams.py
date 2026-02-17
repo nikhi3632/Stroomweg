@@ -83,14 +83,23 @@ def _expand_jt_payload(raw_data):
     return result
 
 
-@router.get("/speeds/stream")
+@router.get("/speeds/stream", summary="Live speed stream (SSE)", description="""
+Server-Sent Events stream of speed updates. Pushes filtered data every 60 seconds.
+
+Open a persistent HTTP connection and receive `event: speeds` messages containing
+JSON arrays of speed readings matching your filter.
+
+**At least one filter required.** Use `curl` to test:
+```bash
+curl -N "https://stroomweg-api-production.up.railway.app/speeds/stream?road=A2"
+```
+""")
 async def speed_stream(
     request: Request,
-    bbox: str | None = Query(None),
-    road: str | None = Query(None),
-    site_id: str | None = Query(None),
+    bbox: str | None = Query(None, description="Bounding box: lat1,lon1,lat2,lon2"),
+    road: str | None = Query(None, description="Road name (e.g. A2)"),
+    site_id: str | None = Query(None, description="Specific site ID"),
 ):
-    """SSE stream of speed updates, filtered by bbox/road/site_id."""
     if not any([bbox, road, site_id]):
         raise HTTPException(400, "At least one filter required: bbox, road, or site_id")
 
@@ -123,15 +132,24 @@ async def speed_stream(
     return EventSourceResponse(event_generator())
 
 
-@router.get("/journey-times/stream")
+@router.get("/journey-times/stream", summary="Live journey time stream (SSE)", description="""
+Server-Sent Events stream of journey time updates. Pushes filtered data every 60 seconds.
+
+Open a persistent HTTP connection and receive `event: journey-times` messages containing
+JSON arrays of journey time readings matching your filter.
+
+**At least one filter required.** Use `curl` to test:
+```bash
+curl -N "https://stroomweg-api-production.up.railway.app/journey-times/stream?road=A28"
+```
+""")
 async def journey_time_stream(
     request: Request,
-    bbox: str | None = Query(None),
-    road: str | None = Query(None),
-    site_id: str | None = Query(None),
-    min_quality: float | None = Query(None, ge=0, le=100),
+    bbox: str | None = Query(None, description="Bounding box: lat1,lon1,lat2,lon2"),
+    road: str | None = Query(None, description="Road name (e.g. A28)"),
+    site_id: str | None = Query(None, description="Specific segment ID"),
+    min_quality: float | None = Query(None, ge=0, le=100, description="Minimum NDW quality score"),
 ):
-    """SSE stream of journey time updates, filtered by bbox/road/site_id."""
     if not any([bbox, road, site_id]):
         raise HTTPException(400, "At least one filter required: bbox, road, or site_id")
 

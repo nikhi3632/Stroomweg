@@ -57,16 +57,25 @@ def _build_site_filter(bbox=None, road=None, site_id=None):
     return conditions, params, idx
 
 
-@router.get("")
+@router.get("", summary="Latest speeds", description="""
+Get the most recent speed snapshot — one aggregated reading per site.
+Speed is averaged across lanes, flow is summed. Updated every 60 seconds.
+
+**At least one filter is required** (20,000 sites is too large to return unfiltered).
+
+Returns `speed_kmh` (average across lanes) and `flow_veh_hr` (total vehicles/hour).
+Null speed means the sensor reported no data for that cycle.
+
+**Example:** `GET /speeds?road=A2&limit=10`
+""")
 async def list_speeds(
     request: Request,
-    bbox: str | None = Query(None, description="lat1,lon1,lat2,lon2"),
-    road: str | None = Query(None, description="Road name filter"),
+    bbox: str | None = Query(None, description="Bounding box: lat1,lon1,lat2,lon2"),
+    road: str | None = Query(None, description="Road name (e.g. A2, A28)"),
     site_id: str | None = Query(None, description="Specific site ID"),
-    limit: int = Query(100, ge=1, le=1000),
-    offset: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=1000, description="Maximum results"),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
 ):
-    """Latest speed snapshot — one aggregated speed per site. At least one filter required."""
     if not any([bbox, road, site_id]):
         raise HTTPException(400, "At least one filter required: bbox, road, or site_id")
 
@@ -136,13 +145,21 @@ async def list_speeds(
     }
 
 
-@router.get("/{site_id}")
+@router.get("/{site_id}", summary="Current speed at one site", description="""
+Get the latest speed reading for a single sensor.
+
+By default returns an aggregate (average speed, total flow across lanes).
+Use `?detail=lanes` to get per-lane breakdown.
+
+**Examples:**
+- `GET /speeds/RWS01_MONIBAS_0161hrr0346ra` — aggregated
+- `GET /speeds/RWS01_MONIBAS_0161hrr0346ra?detail=lanes` — per-lane
+""")
 async def get_speed(
     request: Request,
     site_id: str,
-    detail: str | None = Query(None, description="Set to 'lanes' for per-lane detail"),
+    detail: str | None = Query(None, description="Set to `lanes` for per-lane breakdown"),
 ):
-    """Current speed at one site."""
     pool = request.app.state.pool
     r = request.app.state.redis
 
@@ -198,16 +215,28 @@ async def get_speed(
     }
 
 
-@router.get("/{site_id}/history")
+@router.get("/{site_id}/history", summary="Speed history", description="""
+Historical speed readings for a site across multiple time resolutions.
+
+| Resolution | Retention | Use case |
+|-----------|-----------|----------|
+| `raw` | 7 days | Full 60-second granularity |
+| `5m` | 30 days | Dashboard charts |
+| `15m` | 90 days | Trend analysis |
+| `1h` | Forever | Long-term patterns |
+
+Defaults to the last hour at raw resolution.
+
+**Example:** `GET /speeds/RWS01_MONIBAS_0161hrr0346ra/history?resolution=5m&from=2026-02-17T08:00:00Z&to=2026-02-17T10:00:00Z`
+""")
 async def get_speed_history(
     request: Request,
     site_id: str,
-    start: datetime | None = Query(None, alias="from", description="Start time (ISO 8601)"),
-    end: datetime | None = Query(None, alias="to", description="End time (ISO 8601)"),
-    resolution: str = Query("raw", description="raw, 5m, 15m, or 1h"),
-    limit: int = Query(1000, ge=1, le=10000),
+    start: datetime | None = Query(None, alias="from", description="Start time (ISO 8601). Default: 1 hour ago"),
+    end: datetime | None = Query(None, alias="to", description="End time (ISO 8601). Default: now"),
+    resolution: str = Query("raw", description="Time resolution: `raw`, `5m`, `15m`, or `1h`"),
+    limit: int = Query(1000, ge=1, le=10000, description="Maximum data points"),
 ):
-    """Historical speed readings for a site."""
     if resolution not in RESOLUTION_TABLE:
         raise HTTPException(400, f"resolution must be one of: {', '.join(RESOLUTION_TABLE.keys())}")
 
