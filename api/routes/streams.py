@@ -84,15 +84,7 @@ def _expand_jt_payload(raw_data):
 
 
 @router.get("/speeds/stream", summary="Live speed stream (SSE)", description="""
-Server-Sent Events stream of speed updates. Pushes filtered data every 60 seconds.
-
-Open a persistent HTTP connection and receive `event: speeds` messages containing
-JSON arrays of speed readings matching your filter.
-
-**At least one filter required.** Use `curl` to test:
-```bash
-curl -N "https://stroomweg-api-production.up.railway.app/speeds/stream?road=A2"
-```
+SSE stream pushing filtered speed updates every 60 seconds. At least one filter required.
 """)
 async def speed_stream(
     request: Request,
@@ -133,15 +125,7 @@ async def speed_stream(
 
 
 @router.get("/journey-times/stream", summary="Live journey time stream (SSE)", description="""
-Server-Sent Events stream of journey time updates. Pushes filtered data every 60 seconds.
-
-Open a persistent HTTP connection and receive `event: journey-times` messages containing
-JSON arrays of journey time readings matching your filter.
-
-**At least one filter required.** Use `curl` to test:
-```bash
-curl -N "https://stroomweg-api-production.up.railway.app/journey-times/stream?road=A28"
-```
+SSE stream pushing filtered journey time updates every 60 seconds. At least one filter required.
 """)
 async def journey_time_stream(
     request: Request,

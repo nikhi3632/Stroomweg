@@ -2,17 +2,13 @@
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
+from ..models import SiteListResponse, SiteItem
+
 router = APIRouter(prefix="/sites", tags=["sites"])
 
 
-@router.get("", summary="List sites", description="""
-Search and filter the 99,324 traffic measurement sites across the Netherlands.
-Each site has a unique ID, road name, coordinates, lane count, and equipment type.
-
-Without filters, returns all sites (paginated). Use `bbox` for geographic queries
-or `road` to find all sensors on a specific highway.
-
-**Example:** `GET /sites?road=A28&limit=10`
+@router.get("", summary="List sites", response_model=SiteListResponse, description="""
+Search 99,324 measurement sites. Filter by `road` or `bbox`; returns all sites (paginated) if no filter given.
 """)
 async def list_sites(
     request: Request,
@@ -68,10 +64,8 @@ async def list_sites(
     }
 
 
-@router.get("/{site_id}", summary="Get site details", description="""
-Get full details for a single measurement site by its ID.
-
-**Example:** `GET /sites/RWS01_MONIBAS_0161hrr0346ra`
+@router.get("/{site_id}", summary="Get site details", response_model=SiteItem, description="""
+Full details for a single measurement site.
 """)
 async def get_site(request: Request, site_id: str):
     pool = request.app.state.pool

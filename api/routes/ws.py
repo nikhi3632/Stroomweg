@@ -8,7 +8,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from .streams import _expand_speed_payload, _expand_jt_payload
 
-router = APIRouter(tags=["websocket"])
+router = APIRouter()
 log = logging.getLogger(__name__)
 
 CHANNEL_EXPANDERS = {

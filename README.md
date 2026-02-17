@@ -11,11 +11,11 @@ Real-time traffic intelligence API for the Netherlands. Ingests live speed and j
 ## Try it
 
 ```bash
-# Speeds on the A2 highway
-curl "https://stroomweg-api-production.up.railway.app/speeds?road=A2"
+# Speeds on the A2, slowest first
+curl "https://stroomweg-api-production.up.railway.app/speeds?road=A2&sort=speed_kmh"
 
-# Journey times in Amsterdam (bounding box)
-curl "https://stroomweg-api-production.up.railway.app/journey-times?bbox=52.3,4.8,52.4,5.0"
+# Where is traffic congested right now?
+curl "https://stroomweg-api-production.up.railway.app/journey-times/congestion?road=A2"
 
 # Live speed stream (Server-Sent Events)
 curl -N "https://stroomweg-api-production.up.railway.app/speeds/stream?road=A2"
@@ -57,6 +57,7 @@ curl -N "https://stroomweg-api-production.up.railway.app/speeds/stream?road=A2"
 | `GET /speeds/{site_id}` | Current speed at one sensor, optional `?detail=lanes` |
 | `GET /speeds/{site_id}/history` | Historical speeds (raw / 5m / 15m / 1h resolution) |
 | `GET /journey-times` | Latest journey times with delay computation |
+| `GET /journey-times/congestion` | Congested segments sorted worst-first |
 | `GET /journey-times/{site_id}` | Current journey time for one segment |
 | `GET /journey-times/{site_id}/history` | Historical journey times (multi-resolution) |
 | `GET /sites` | Search 99,324 sensor sites by road name or bounding box |
@@ -66,7 +67,7 @@ curl -N "https://stroomweg-api-production.up.railway.app/speeds/stream?road=A2"
 | `WS /ws` | WebSocket with JSON subscribe/unsubscribe protocol |
 | `GET /health` | Service health, DB/Redis connectivity, data freshness |
 
-### Filtering
+### Filtering & Sorting
 
 All list endpoints support these filters (at least one required on speeds/journey-times):
 
@@ -75,6 +76,7 @@ All list endpoints support these filters (at least one required on speeds/journe
 | `road` | `A2`, `N201` | Road name |
 | `bbox` | `52.3,4.8,52.4,5.0` | Bounding box: lat1,lon1,lat2,lon2 |
 | `site_id` | `RWS01_MONIBAS_0161hrr0346ra` | Specific sensor ID |
+| `sort` | `-speed_kmh`, `delay_ratio` | Sort field (prefix `-` for descending) |
 
 ### Historical Resolutions
 
@@ -123,13 +125,14 @@ wss://stroomweg-api-production.up.railway.app/ws
 Stroomweg/
 ├── api/                        # FastAPI application
 │   ├── app.py                  # App setup, lifespan, health, landing page
+│   ├── models.py               # Pydantic response models (OpenAPI schemas)
 │   ├── config.py               # Environment variables
 │   ├── db.py                   # asyncpg connection pool
 │   ├── redis.py                # Redis connection
 │   └── routes/
 │       ├── sites.py            # GET /sites, GET /sites/{id}
-│       ├── speeds.py           # GET /speeds, history, per-site
-│       ├── journey_times.py    # GET /journey-times, history, per-site
+│       ├── speeds.py           # GET /speeds, history, per-site, sort
+│       ├── journey_times.py    # GET /journey-times, history, congestion
 │       ├── streams.py          # SSE endpoints
 │       └── ws.py               # WebSocket endpoint
 │

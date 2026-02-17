@@ -4,7 +4,7 @@ from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from ..redis import get_redis
+from ..models import SpeedListResponse, SpeedSiteAggregate, SpeedSiteLanes, SpeedHistoryResponse
 
 router = APIRouter(prefix="/speeds", tags=["speeds"])
 
@@ -20,6 +20,12 @@ RESOLUTION_COLUMNS = {
     "5m": ("avg_speed_kmh", "avg_flow_veh_hr", "bucket"),
     "15m": ("avg_speed_kmh", "avg_flow_veh_hr", "bucket"),
     "1h": ("avg_speed_kmh", "avg_flow_veh_hr", "bucket"),
+}
+
+SORT_FIELDS = {
+    "speed_kmh": "speed_kmh",
+    "flow_veh_hr": "flow_veh_hr",
+    "site_id": "sp.site_id",
 }
 
 
@@ -57,28 +63,41 @@ def _build_site_filter(bbox=None, road=None, site_id=None):
     return conditions, params, idx
 
 
-@router.get("", summary="Latest speeds", description="""
-Get the most recent speed snapshot — one aggregated reading per site.
-Speed is averaged across lanes, flow is summed. Updated every 60 seconds.
+def _parse_sort(sort: str | None, allowed: dict, default: str) -> str:
+    """Parse sort parameter into SQL ORDER BY clause."""
+    if not sort:
+        return default
 
-**At least one filter is required** (20,000 sites is too large to return unfiltered).
+    desc = sort.startswith("-")
+    field = sort.lstrip("-")
 
-Returns `speed_kmh` (average across lanes) and `flow_veh_hr` (total vehicles/hour).
-Null speed means the sensor reported no data for that cycle.
+    if field not in allowed:
+        raise HTTPException(400, f"sort must be one of: {', '.join(allowed.keys())} (prefix with - for descending)")
 
-**Example:** `GET /speeds?road=A2&limit=10`
+    direction = "DESC" if desc else "ASC"
+    return f"{allowed[field]} {direction}"
+
+
+@router.get("", summary="Latest speeds", response_model=SpeedListResponse, description="""
+Latest speed snapshot — one aggregated reading per site (avg speed across lanes, summed flow). At least one filter required.
+
+Sort: `?sort=speed_kmh` or `?sort=-speed_kmh` (prefix `-` for desc). Fields: `speed_kmh`, `flow_veh_hr`, `site_id`.
+
+NDW speed data has no quality score — use journey-time endpoints for quality filtering.
 """)
 async def list_speeds(
     request: Request,
     bbox: str | None = Query(None, description="Bounding box: lat1,lon1,lat2,lon2"),
     road: str | None = Query(None, description="Road name (e.g. A2, A28)"),
     site_id: str | None = Query(None, description="Specific site ID"),
+    sort: str | None = Query(None, description="Sort field (prefix with - for desc): speed_kmh, flow_veh_hr, site_id"),
     limit: int = Query(100, ge=1, le=1000, description="Maximum results"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
 ):
     if not any([bbox, road, site_id]):
         raise HTTPException(400, "At least one filter required: bbox, road, or site_id")
 
+    order_by = _parse_sort(sort, SORT_FIELDS, "sp.site_id")
     pool = request.app.state.pool
     r = request.app.state.redis
 
@@ -112,6 +131,7 @@ async def list_speeds(
         rows = await conn.fetch(
             f"""
             SELECT sp.site_id,
+                   s.name,
                    sp.timestamp,
                    AVG(sp.speed_kmh) AS speed_kmh,
                    SUM(sp.flow_veh_hr) AS flow_veh_hr,
@@ -119,8 +139,8 @@ async def list_speeds(
             FROM speeds_raw sp
             JOIN sites s ON s.site_id = sp.site_id
             {where}
-            GROUP BY sp.site_id, sp.timestamp, s.road, s.geom
-            ORDER BY sp.site_id
+            GROUP BY sp.site_id, sp.timestamp, s.name, s.road, s.geom
+            ORDER BY {order_by}
             LIMIT ${idx} OFFSET ${idx+1}
             """,
             *params, limit, offset,
@@ -133,6 +153,7 @@ async def list_speeds(
         "data": [
             {
                 "site_id": r["site_id"],
+                "name": r["name"],
                 "timestamp": r["timestamp"].isoformat(),
                 "speed_kmh": round(float(r["speed_kmh"]), 1) if r["speed_kmh"] is not None else None,
                 "flow_veh_hr": int(r["flow_veh_hr"]) if r["flow_veh_hr"] is not None else None,
@@ -145,15 +166,8 @@ async def list_speeds(
     }
 
 
-@router.get("/{site_id}", summary="Current speed at one site", description="""
-Get the latest speed reading for a single sensor.
-
-By default returns an aggregate (average speed, total flow across lanes).
-Use `?detail=lanes` to get per-lane breakdown.
-
-**Examples:**
-- `GET /speeds/RWS01_MONIBAS_0161hrr0346ra` — aggregated
-- `GET /speeds/RWS01_MONIBAS_0161hrr0346ra?detail=lanes` — per-lane
+@router.get("/{site_id}", summary="Current speed at one site", response_model=SpeedSiteAggregate | SpeedSiteLanes, description="""
+Latest speed for a single sensor. Returns aggregate by default; use `?detail=lanes` for per-lane breakdown.
 """)
 async def get_speed(
     request: Request,
@@ -162,6 +176,14 @@ async def get_speed(
 ):
     pool = request.app.state.pool
     r = request.app.state.redis
+
+    # Get site name
+    async with pool.acquire() as conn:
+        site_row = await conn.fetchrow(
+            "SELECT name FROM sites WHERE site_id = $1", site_id
+        )
+
+    site_name = site_row["name"] if site_row else None
 
     # Try Redis for the latest timestamp, fall back to DB
     ts_str = await r.get("speeds:timestamp")
@@ -193,6 +215,7 @@ async def get_speed(
     if detail == "lanes":
         return {
             "site_id": site_id,
+            "name": site_name,
             "timestamp": latest_ts.isoformat(),
             "lanes": [
                 {
@@ -209,25 +232,15 @@ async def get_speed(
 
     return {
         "site_id": site_id,
+        "name": site_name,
         "timestamp": latest_ts.isoformat(),
         "speed_kmh": round(sum(speeds) / len(speeds), 1) if speeds else None,
         "flow_veh_hr": sum(flows) if flows else None,
     }
 
 
-@router.get("/{site_id}/history", summary="Speed history", description="""
-Historical speed readings for a site across multiple time resolutions.
-
-| Resolution | Retention | Use case |
-|-----------|-----------|----------|
-| `raw` | 7 days | Full 60-second granularity |
-| `5m` | 30 days | Dashboard charts |
-| `15m` | 90 days | Trend analysis |
-| `1h` | Forever | Long-term patterns |
-
-Defaults to the last hour at raw resolution.
-
-**Example:** `GET /speeds/RWS01_MONIBAS_0161hrr0346ra/history?resolution=5m&from=2026-02-17T08:00:00Z&to=2026-02-17T10:00:00Z`
+@router.get("/{site_id}/history", summary="Speed history", response_model=SpeedHistoryResponse, description="""
+Historical speeds at multiple resolutions: `raw` (7d), `5m` (30d), `15m` (90d), `1h` (forever). Defaults to last hour at raw.
 """)
 async def get_speed_history(
     request: Request,
