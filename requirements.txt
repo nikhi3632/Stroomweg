@@ -2,3 +2,7 @@ asyncpg
 lxml
 httpx
 python-dotenv
+redis[hiredis]
+fastapi
+uvicorn[standard]
+sse-starlette

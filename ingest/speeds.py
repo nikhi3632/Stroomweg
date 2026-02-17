@@ -99,4 +99,4 @@ async def ingest_speeds(pool, index_mappings, client):
             rows,
         )
 
-    return len(rows)
+    return rows

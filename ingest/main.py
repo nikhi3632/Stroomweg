@@ -9,6 +9,7 @@ import httpx
 
 from .config import POLL_INTERVAL
 from .db import get_pool, close_pool
+from .redis import get_redis, close_redis, publish_speeds, publish_journey_times
 from .reference import load_reference_data
 from .speeds import ingest_speeds
 from .journey_times import ingest_journey_times
@@ -41,10 +42,20 @@ async def run():
             cycle_start = time.monotonic()
 
             try:
-                speed_count, jt_count = await asyncio.gather(
+                speed_rows, jt_rows = await asyncio.gather(
                     ingest_speeds(pool, index_mappings, client),
                     ingest_journey_times(pool, client),
                 )
+
+                # Publish to Redis (non-blocking, best-effort)
+                try:
+                    await asyncio.gather(
+                        publish_speeds(speed_rows),
+                        publish_journey_times(jt_rows),
+                    )
+                except Exception:
+                    log.exception("Redis publish failed (non-fatal)")
+
                 elapsed = time.monotonic() - cycle_start
 
                 # Query total row counts for confidence
@@ -53,7 +64,7 @@ async def run():
                     jt_total = await conn.fetchval("SELECT COUNT(*) FROM journey_times_raw")
 
                 log.info(
-                    f"Cycle: +{speed_count} speeds, +{jt_count} jt in {elapsed:.1f}s "
+                    f"Cycle: +{len(speed_rows)} speeds, +{len(jt_rows)} jt in {elapsed:.1f}s "
                     f"| total: {speed_total:,} speeds, {jt_total:,} jt"
                 )
             except Exception:
@@ -72,6 +83,7 @@ async def run():
             except asyncio.TimeoutError:
                 pass  # normal — timeout means time to poll again
 
+    await close_redis()
     await close_pool()
     log.info("Shutdown complete")
 

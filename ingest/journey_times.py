@@ -91,4 +91,4 @@ async def ingest_journey_times(pool, client):
             rows,
         )
 
-    return len(rows)
+    return rows

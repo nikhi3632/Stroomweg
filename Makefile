@@ -1,6 +1,6 @@
 # Stroomweg Makefile
 
-.PHONY: help install migrate db-status db-delete db-reset db-shell db-count ingest ingest-start ingest-stop ingest-logs ingest-status test clean
+.PHONY: help install migrate db-status db-delete db-reset db-shell db-count ingest ingest-start ingest-stop ingest-logs ingest-status api api-start api-stop api-logs test clean
 
 help:
 	@echo "Stroomweg Commands"
@@ -23,6 +23,12 @@ help:
 	@echo "  make ingest-stop    Stop ingest on Railway"
 	@echo "  make ingest-logs    View Railway logs"
 	@echo "  make ingest-status  Show Railway status"
+	@echo ""
+	@echo "API (Railway):"
+	@echo "  make api            Start API locally (dev)"
+	@echo "  make api-start      Start API on Railway"
+	@echo "  make api-stop       Stop API on Railway"
+	@echo "  make api-logs       View API Railway logs"
 	@echo ""
 	@echo "Development:"
 	@echo "  make test           Run tests"
@@ -68,6 +74,19 @@ ingest-logs:
 
 ingest-status:
 	.venv/bin/python scripts/ingest_status.py
+
+# API
+api:
+	.venv/bin/uvicorn api.app:app --reload --port 8000
+
+api-start:
+	railway up --service Stroomweg-API --detach
+
+api-stop:
+	railway down --service Stroomweg-API -y
+
+api-logs:
+	railway logs --service Stroomweg-API
 
 # Development
 test:
