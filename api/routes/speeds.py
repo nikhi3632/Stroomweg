@@ -4,6 +4,8 @@ from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
+from ..redis import get_redis
+
 router = APIRouter(prefix="/speeds", tags=["speeds"])
 
 RESOLUTION_TABLE = {
@@ -69,12 +71,15 @@ async def list_speeds(
         raise HTTPException(400, "At least one filter required: bbox, road, or site_id")
 
     pool = request.app.state.pool
+    r = request.app.state.redis
+
+    # Read latest timestamp from Redis (set by ingest service every cycle)
+    ts_str = await r.get("speeds:timestamp")
+    if not ts_str:
+        raise HTTPException(503, "No speed data available yet")
+    latest_ts = datetime.fromisoformat(ts_str)
 
     async with pool.acquire() as conn:
-        # Get the latest timestamp
-        latest_ts = await conn.fetchval("SELECT MAX(timestamp) FROM speeds_raw")
-        if latest_ts is None:
-            raise HTTPException(503, "No speed data available yet")
 
         conditions, params, idx = _build_site_filter(bbox, road, site_id)
         conditions.append(f"sp.timestamp = ${idx}")
@@ -139,14 +144,22 @@ async def get_speed(
 ):
     """Current speed at one site."""
     pool = request.app.state.pool
+    r = request.app.state.redis
 
-    async with pool.acquire() as conn:
-        latest_ts = await conn.fetchval(
-            "SELECT MAX(timestamp) FROM speeds_raw WHERE site_id = $1", site_id
-        )
+    # Try Redis for the latest timestamp, fall back to DB
+    ts_str = await r.get("speeds:timestamp")
+    if ts_str:
+        latest_ts = datetime.fromisoformat(ts_str)
+    else:
+        async with pool.acquire() as conn:
+            latest_ts = await conn.fetchval(
+                "SELECT timestamp FROM speeds_raw WHERE site_id = $1 ORDER BY timestamp DESC LIMIT 1",
+                site_id,
+            )
         if latest_ts is None:
             raise HTTPException(404, f"No speed data for site {site_id}")
 
+    async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
             SELECT lane, speed_kmh, flow_veh_hr
@@ -156,6 +169,9 @@ async def get_speed(
             """,
             site_id, latest_ts,
         )
+
+    if not rows:
+        raise HTTPException(404, f"No speed data for site {site_id}")
 
     if detail == "lanes":
         return {

@@ -4,6 +4,8 @@ from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
+from ..redis import get_redis
+
 router = APIRouter(prefix="/journey-times", tags=["journey-times"])
 
 RESOLUTION_TABLE = {
@@ -90,11 +92,15 @@ async def list_journey_times(
         raise HTTPException(400, "At least one filter required: bbox, road, or site_id")
 
     pool = request.app.state.pool
+    r = request.app.state.redis
+
+    # Read latest timestamp from Redis (set by ingest service every cycle)
+    ts_str = await r.get("jt:timestamp")
+    if not ts_str:
+        raise HTTPException(503, "No journey time data available yet")
+    latest_ts = datetime.fromisoformat(ts_str)
 
     async with pool.acquire() as conn:
-        latest_ts = await conn.fetchval("SELECT MAX(timestamp) FROM journey_times_raw")
-        if latest_ts is None:
-            raise HTTPException(503, "No journey time data available yet")
 
         conditions, params, idx = _build_site_filter(bbox, road, site_id)
         conditions.append(f"jt.timestamp = ${idx}")

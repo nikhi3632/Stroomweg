@@ -57,13 +57,12 @@ async def health():
     except Exception:
         pass
 
-    # Data freshness from DB
+    # Data freshness from Redis (set by ingest service every cycle)
     speed_ts = None
     jt_ts = None
     try:
-        async with pool.acquire() as conn:
-            speed_ts = await conn.fetchval("SELECT MAX(timestamp) FROM speeds_raw")
-            jt_ts = await conn.fetchval("SELECT MAX(timestamp) FROM journey_times_raw")
+        speed_ts = await r.get("speeds:timestamp")
+        jt_ts = await r.get("jt:timestamp")
     except Exception:
         pass
 
@@ -71,7 +70,7 @@ async def health():
         "status": "healthy" if db_ok and redis_ok else "degraded",
         "database": "connected" if db_ok else "disconnected",
         "redis": "connected" if redis_ok else "disconnected",
-        "last_speed_update": speed_ts.isoformat() if speed_ts else None,
-        "last_jt_update": jt_ts.isoformat() if jt_ts else None,
+        "last_speed_update": speed_ts or None,
+        "last_jt_update": jt_ts or None,
         "checked_at": datetime.now(timezone.utc).isoformat(),
     }
