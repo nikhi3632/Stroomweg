@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from fastapi import FastAPI
+from fastapi.responses import RedirectResponse
 
 from .db import get_pool, close_pool
 from .redis import get_redis, close_redis
@@ -33,6 +34,11 @@ app.include_router(speeds.router)
 app.include_router(journey_times.router)
 app.include_router(streams.router)
 app.include_router(ws.router)
+
+
+@app.get("/", include_in_schema=False)
+async def root():
+    return RedirectResponse(url="/docs")
 
 
 @app.get("/health")
