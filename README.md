@@ -87,6 +87,10 @@ All list endpoints support these filters (at least one required on speeds/journe
 | `15m` | 90 days | Trend analysis |
 | `1h` | Forever | Long-term patterns |
 
+### Rate Limiting
+
+60 requests per minute per IP. Responses include `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset` headers. Exceeding the limit returns `429 Too Many Requests` with a `Retry-After` header. Health, docs, and WebSocket endpoints are exempt.
+
 ### WebSocket Protocol
 
 ```jsonc

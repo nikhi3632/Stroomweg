@@ -4,17 +4,61 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from fastapi import FastAPI
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 from .db import get_pool, close_pool
 from .models import HealthResponse
 from .redis import get_redis, close_redis
 from .routes import sites, speeds, journey_times, streams, ws
 
+RATE_LIMIT = 60  # requests per window
+RATE_WINDOW = 60  # seconds
+
+RATE_LIMIT_SKIP = frozenset({"/", "/health", "/docs", "/openapi.json", "/redoc"})
+
+
+class RateLimitMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        if request.url.path in RATE_LIMIT_SKIP or request.url.path.startswith("/ws"):
+            return await call_next(request)
+
+        ip = request.client.host if request.client else "unknown"
+        key = f"ratelimit:{ip}"
+
+        try:
+            r = request.app.state.redis
+            count = await r.incr(key)
+            if count == 1:
+                await r.expire(key, RATE_WINDOW)
+            ttl = await r.ttl(key)
+        except Exception:
+            return await call_next(request)
+
+        headers = {
+            "X-RateLimit-Limit": str(RATE_LIMIT),
+            "X-RateLimit-Remaining": str(max(0, RATE_LIMIT - count)),
+            "X-RateLimit-Reset": str(max(0, ttl)),
+        }
+
+        if count > RATE_LIMIT:
+            return JSONResponse(
+                status_code=429,
+                content={"detail": f"Rate limit exceeded. {RATE_LIMIT} requests per minute allowed."},
+                headers={**headers, "Retry-After": str(max(0, ttl))},
+            )
+
+        response = await call_next(request)
+        for k, v in headers.items():
+            response.headers[k] = v
+        return response
+
 DESCRIPTION = """
 Live traffic speeds, journey times, and sensor data from **99,324 measurement sites**
 across the Netherlands, updated every 60 seconds from [NDW](https://opendata.ndw.nu) open data feeds.
 
-**Rate limits:** 60 req/min (advisory, not enforced). No auth required.
+**Rate limits:** 60 req/min per IP. No auth required.
 """
 
 tags_metadata = [
@@ -59,6 +103,8 @@ app = FastAPI(
     lifespan=lifespan,
     license_info={"name": "MIT"},
 )
+
+app.add_middleware(RateLimitMiddleware)
 
 app.include_router(sites.router)
 app.include_router(speeds.router)
